@@ -32,6 +32,9 @@
 The **requirements.txt** file was tested for installation on 
 Ubuntu 22.04-24.04, Windows 11 and MacOS Sequoia 15.3.1 (with M3 procesor).
 
+### Project Discord
+All changes in this repository will be announced in the project Disord channel **qrc-github-notifications**.
+
 ### License
 This project is licensed under the [GNU General Public License v3](./LICENSE).
 The GPL v3 license requires attribution for modifications and derivatives, ensuring that users know which versions are changed and to protect the reputations of original authors.
