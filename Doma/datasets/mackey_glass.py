@@ -43,3 +43,15 @@ class MackeyGlassDataset(TimeSeriesDataset):
 
         self.series = x[delay_steps:]
         return self.series
+    
+    def info(self):
+        base_info = super().info()
+        mg_params = {
+            "beta": getattr(self, "beta", None),
+            "gamma": getattr(self, "gamma", None),
+            "n": getattr(self, "n", None),
+            "tau": getattr(self, "tau", None),
+            "delta_t": getattr(self, "delta_t", None)
+        }
+        base_info.update(mg_params)
+        return base_info
