@@ -8,7 +8,7 @@ from .models import (train_esn_reservoir, predict_esn,
                      initialize_classical_reservoir, train_classical_reservoir,
                      predict_esn_classical)
 
-# --- Podstawowe funkcje uruchamiające pojedynczy eksperyment (bez zmian) ---
+# --- Basic functions for running a single experiment (unchanged) ---
 
 DEFAULT_EVAL_PROTOCOL = "cold_start"
 DEFAULT_CLASSICAL_LAG = 0
@@ -77,24 +77,24 @@ def run_single_classical_trial(params, profile, time_series, train_fraction, see
     )
     return mean_squared_error(test_outputs, predictions)
 
-# --- NOWE FUNKCJE-WRAPPERS, KTÓRE ZARZĄDZAJĄ POD-ZIARNAMI ---
+# --- New wrapper functions that manage sub-seeds ---
 
 def run_qrc_experiment_with_subseeds(params, profile, time_series, train_fraction, base_seed, num_trials=11):
     """
     Runs a QRC experiment multiple times with different sub-seeds and returns aggregated results.
     """
     mse_scores = []
-    # Tworzymy listę pod-ziaren na podstawie głównego ziarna
+    # Build the sub-seed list from the main seed.
     sub_seeds = [base_seed + i for i in range(num_trials)]
     
     for seed in sub_seeds:
         mse = run_single_qrc_trial(params, profile, time_series, train_fraction, seed)
         mse_scores.append(mse)
     
-    # Obliczamy statystyki
+    # Compute summary statistics.
     median_mse = np.median(mse_scores)
     std_dev_mse = np.std(mse_scores)
-    # Współczynnik zmienności (CV) - miara stabilności
+    # Coefficient of variation (CV) used as a stability measure.
     cv_mse = std_dev_mse / median_mse if median_mse > 0 else 0
     representative_seed = _select_representative_seed(sub_seeds, mse_scores)
 
