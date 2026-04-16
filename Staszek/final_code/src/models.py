@@ -1,7 +1,6 @@
 # src/models.py
 
-import pennylane as qml
-from pennylane import numpy as np
+import numpy as np
 
 
 def get_q_device(n_qubits):
@@ -18,6 +17,8 @@ def get_q_device(n_qubits):
     qml.Device
         A PennyLane device instance.
     """
+    import pennylane as qml
+
     return qml.device("default.qubit", wires=n_qubits, shots=None)
 
 
@@ -45,6 +46,8 @@ def quantum_feature_map(inputs, weights, biases, n_layers, n_qubits, dev):
     np.ndarray
         The expectation values of the observables, serving as quantum features.
     """
+    import pennylane as qml
+
     @qml.qnode(dev)
     def circuit(inputs, weights, biases):
         for i in range(n_qubits):
@@ -279,7 +282,7 @@ def train_classical_reservoir(train_inputs, train_outputs, W_in, W_res, reservoi
     return W_out, reservoir_state
 
 
-def predict_esn_classical(test_inputs, W_in, W_res, W_out, reservoir_size, leakage_rate, initial_state):
+def predict_esn_classical(test_inputs, W_in, W_res, W_out, reservoir_size, leakage_rate, initial_state=None):
     """
     Makes one-step-ahead predictions with the trained classical ESN.
 
@@ -297,8 +300,10 @@ def predict_esn_classical(test_inputs, W_in, W_res, W_out, reservoir_size, leaka
         The number of neurons in the reservoir.
     leakage_rate : float
         The leakage rate of the reservoir.
-    initial_state : np.ndarray
-        The final state of the reservoir after training, used to initialize prediction.
+    initial_state : np.ndarray | None, optional
+        Optional reservoir state used to initialize prediction. When omitted,
+        prediction starts from the zero-state cold-start condition used in the
+        reported experiments.
 
     Returns
     -------
@@ -306,7 +311,10 @@ def predict_esn_classical(test_inputs, W_in, W_res, W_out, reservoir_size, leaka
         An array containing the model's predictions.
     """
     predictions = []
-    reservoir_state = initial_state.copy()
+    if initial_state is None:
+        reservoir_state = np.zeros(reservoir_size)
+    else:
+        reservoir_state = initial_state.copy()
 
     for input_seq in test_inputs:
         reservoir_state = update_reservoir_state(input_seq, W_in, W_res, reservoir_state, leakage_rate)

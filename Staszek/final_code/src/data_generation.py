@@ -1,12 +1,11 @@
 # src/data_generation.py
 
 import numpy as np
-from scipy.signal import lfilter
 
 
 def mackey_glass(beta=0.2, gamma=0.1, n=10, tau=30, dt=1.0, T=2000):
     """
-    Generates the Mackey-Glass time series and scales it to [0, 1].
+    Generates the raw Mackey-Glass time series.
 
     Parameters
     ----------
@@ -26,7 +25,7 @@ def mackey_glass(beta=0.2, gamma=0.1, n=10, tau=30, dt=1.0, T=2000):
     Returns
     -------
     np.ndarray
-        The generated and scaled Mackey-Glass time series.
+        The generated Mackey-Glass time series.
     """
     N = int(T / dt)
     delay_steps = int(tau / dt)
@@ -38,11 +37,97 @@ def mackey_glass(beta=0.2, gamma=0.1, n=10, tau=30, dt=1.0, T=2000):
         dxdt = (beta * x_tau / (1 + x_tau**n)) - (gamma * x[t])
         x[t+1] = x[t] + dxdt * dt
 
-    x_series = x[delay_steps:]
-    x_min, x_max = np.min(x_series), np.max(x_series)
-    x_scaled = (x_series - x_min) / (x_max - x_min)
+    return x[delay_steps:]
 
-    return x_scaled
+
+def split_time_series(time_series, train_fraction):
+    """
+    Splits a time series into train and test segments.
+
+    Parameters
+    ----------
+    time_series : np.ndarray
+        The full input time series.
+    train_fraction : float
+        Fraction of the series to allocate to training.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        The train and test segments.
+    """
+    split_point = int(len(time_series) * train_fraction)
+    time_series = np.asarray(time_series, dtype=float)
+    return time_series[:split_point], time_series[split_point:]
+
+
+def fit_minmax_scaler(train_series):
+    """
+    Fits min-max scaling statistics on the training split only.
+
+    Parameters
+    ----------
+    train_series : np.ndarray
+        The training time series used to estimate the scaling parameters.
+
+    Returns
+    -------
+    dict[str, float]
+        A mapping containing the training minimum and maximum.
+    """
+    train_series = np.asarray(train_series, dtype=float)
+    return {
+        "min": float(np.min(train_series)),
+        "max": float(np.max(train_series)),
+    }
+
+
+def transform_with_minmax_scaler(time_series, scaler):
+    """
+    Applies pre-fit min-max scaling to a time series.
+
+    Parameters
+    ----------
+    time_series : np.ndarray
+        The series to transform.
+    scaler : dict[str, float]
+        The scaling statistics returned by ``fit_minmax_scaler``.
+
+    Returns
+    -------
+    np.ndarray
+        The transformed series.
+    """
+    time_series = np.asarray(time_series, dtype=float)
+    scale_range = scaler["max"] - scaler["min"]
+    if scale_range <= 0:
+        return np.zeros_like(time_series, dtype=float)
+    return (time_series - scaler["min"]) / scale_range
+
+
+def split_and_scale_series(time_series, train_fraction):
+    """
+    Splits a time series and applies train-fit min-max scaling to both splits.
+
+    Parameters
+    ----------
+    time_series : np.ndarray
+        The full input time series.
+    train_fraction : float
+        Fraction of the series to allocate to training.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, dict[str, float]]
+        The scaled train split, scaled test split, and scaling statistics.
+    """
+    train_series, test_series = split_time_series(time_series, train_fraction)
+    scaler = fit_minmax_scaler(train_series)
+    return (
+        transform_with_minmax_scaler(train_series, scaler),
+        transform_with_minmax_scaler(test_series, scaler),
+        scaler,
+    )
 
 
 def create_io_pairs(data, window_size, lag=0):
@@ -75,7 +160,7 @@ def create_io_pairs(data, window_size, lag=0):
 
 def generate_arma_data(n_points=1000, ar_coeffs=[1, -0.7], ma_coeffs=[1, 0.5, -0.3], seed=42):
     """
-    Generates time series data from an ARMA(p,q) process and scales it to [0, 1].
+    Generates raw time series data from an ARMA(p,q) process.
 
     Parameters
     ----------
@@ -91,21 +176,20 @@ def generate_arma_data(n_points=1000, ar_coeffs=[1, -0.7], ma_coeffs=[1, 0.5, -0
     Returns
     -------
     np.ndarray
-        The generated and scaled ARMA time series.
+        The generated ARMA time series.
     """
+    from scipy.signal import lfilter
+
     np.random.seed(seed)
     noise = np.random.normal(0, 1, n_points)
     data = lfilter(ma_coeffs, ar_coeffs, noise)
 
-    data_min, data_max = np.min(data), np.max(data)
-    data_scaled = (data - data_min) / (data_max - data_min)
-
-    return data_scaled
+    return data
 
 
 def generate_narma_data(n_points=2000, order=10, alpha=0.3, beta=0.05, gamma=1.5, delta=0.1, seed=42):
     """
-    Generates time series data from a NARMA process and scales it to [0, 1].
+    Generates raw time series data from a NARMA process.
 
     Parameters
     ----------
@@ -121,7 +205,7 @@ def generate_narma_data(n_points=2000, order=10, alpha=0.3, beta=0.05, gamma=1.5
     Returns
     -------
     np.ndarray
-        The generated and scaled NARMA time series.
+        The generated NARMA time series.
     """
     np.random.seed(seed)
     s = np.random.uniform(0, 0.5, n_points)
@@ -134,7 +218,4 @@ def generate_narma_data(n_points=2000, order=10, alpha=0.3, beta=0.05, gamma=1.5
                 gamma * s[k-order] * s[k] +
                 delta)
 
-    y_min, y_max = np.min(y), np.max(y)
-    y_scaled = (y - y_min) / (y_max - y_min)
-
-    return y_scaled
+    return y
