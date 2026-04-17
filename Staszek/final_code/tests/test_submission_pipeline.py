@@ -9,7 +9,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.analysis import calculate_effective_dimension, calculate_participation_ratio
+from src.analysis import (
+    calculate_effective_dimension,
+    calculate_participation_ratio,
+    canonical_correlations,
+    memory_capacity_spectrum,
+)
 from src.data_generation import generate_arma_data, split_and_scale_series
 from src.experiment import (
     run_classical_experiment_with_subseeds,
@@ -148,6 +153,110 @@ class SubmissionPipelineTests(unittest.TestCase):
             ]
         )
         self.assertTrue(np.isclose(calculate_participation_ratio(feature_matrix), 2.0))
+
+
+def _build_esn_states(inputs, leakage_rate, state_dim):
+    states = np.zeros((len(inputs), state_dim))
+    current = np.zeros(state_dim)
+    for t, u in enumerate(inputs):
+        current = (1 - leakage_rate) * current + leakage_rate * u
+        states[t] = current
+    return states
+
+
+class MemoryCapacitySpectrumTests(unittest.TestCase):
+    def test_window_features_have_sharp_cutoff_at_window_size(self):
+        rng = np.random.default_rng(7)
+        window_size = 4
+        n_steps = 600
+        series = rng.uniform(-1.0, 1.0, size=n_steps)
+
+        n_samples = n_steps - window_size + 1
+        features = np.stack(
+            [series[t : t + window_size] for t in range(n_samples)]
+        )
+        reference = features[:, -1]
+
+        lags, mc = memory_capacity_spectrum(
+            features, reference, lags=range(0, 2 * window_size), lambda_reg=1e-10
+        )
+
+        for k in range(window_size):
+            self.assertGreater(
+                mc[k], 0.9,
+                msg=f"lag {k} inside window should recover near-perfectly, got MC={mc[k]:.3f}",
+            )
+        for k in range(window_size, 2 * window_size):
+            self.assertLess(
+                mc[k], 0.1,
+                msg=f"lag {k} outside window should drop to ~0, got MC={mc[k]:.3f}",
+            )
+
+    def test_esn_memory_decays_faster_for_higher_leakage(self):
+        rng = np.random.default_rng(11)
+        n_steps = 800
+        state_dim = 6
+        inputs = rng.uniform(-1.0, 1.0, size=(n_steps, 1))
+
+        states_low = _build_esn_states(inputs, leakage_rate=0.2, state_dim=state_dim)
+        states_high = _build_esn_states(inputs, leakage_rate=0.9, state_dim=state_dim)
+        reference = inputs[:, 0]
+
+        lags = list(range(0, 20))
+        _, mc_low = memory_capacity_spectrum(
+            states_low, reference, lags=lags, lambda_reg=1e-8
+        )
+        _, mc_high = memory_capacity_spectrum(
+            states_high, reference, lags=lags, lambda_reg=1e-8
+        )
+
+        area_low = np.nansum(mc_low)
+        area_high = np.nansum(mc_high)
+        self.assertGreater(
+            area_low, area_high,
+            msg=f"low-leakage MC area ({area_low:.3f}) should exceed high-leakage area ({area_high:.3f})",
+        )
+        mid = 6
+        self.assertGreater(
+            mc_low[mid], mc_high[mid],
+            msg=f"at mid lag {mid} low-leakage MC={mc_low[mid]:.3f} should exceed high-leakage MC={mc_high[mid]:.3f}",
+        )
+
+
+class CanonicalCorrelationTests(unittest.TestCase):
+    def test_identical_inputs_yield_unit_correlations(self):
+        rng = np.random.default_rng(3)
+        F = rng.standard_normal(size=(200, 5))
+        corrs = canonical_correlations(F, F.copy())
+        self.assertEqual(corrs.shape[0], 5)
+        self.assertTrue(
+            np.allclose(corrs, 1.0, atol=1e-8),
+            msg=f"expected all ones, got {corrs}",
+        )
+
+    def test_independent_inputs_yield_low_correlations(self):
+        rng = np.random.default_rng(5)
+        F_a = rng.standard_normal(size=(500, 3))
+        F_b = rng.standard_normal(size=(500, 3))
+        corrs = canonical_correlations(F_a, F_b)
+        self.assertLess(
+            corrs[0], 0.3,
+            msg=f"independent Gaussian columns should give low top CCA, got {corrs}",
+        )
+
+    def test_partial_shared_subspace_recovered(self):
+        rng = np.random.default_rng(17)
+        shared = rng.standard_normal(size=(400, 1))
+        F_a = np.hstack([shared, rng.standard_normal(size=(400, 2))])
+        F_b = np.hstack(
+            [
+                shared + 0.01 * rng.standard_normal(size=(400, 1)),
+                rng.standard_normal(size=(400, 2)),
+            ]
+        )
+        corrs = canonical_correlations(F_a, F_b)
+        self.assertGreater(corrs[0], 0.95)
+        self.assertLess(corrs[-1], 0.3)
 
 
 if __name__ == "__main__":

@@ -194,4 +194,6 @@ cython_debug/
 .cursorindexingignore
 
 # Ignore all PNG images
-*.png
+*.pngCLAUDE.md
+Staszek/paper/
+Staszek/CLAUDE.md

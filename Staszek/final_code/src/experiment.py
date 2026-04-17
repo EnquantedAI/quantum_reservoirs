@@ -4,7 +4,8 @@ from sklearn.metrics import mean_squared_error
 from .data_generation import create_io_pairs, split_and_scale_series
 from .models import (train_esn_reservoir, predict_esn,
                      initialize_classical_reservoir, train_classical_reservoir,
-                     predict_esn_classical)
+                     predict_esn_classical,
+                     get_q_device, quantum_feature_map)
 
 # Helpers for single runs.
 
@@ -145,4 +146,56 @@ def run_classical_experiment_with_subseeds(params, profile, time_series, train_f
         'representative_seed': representative_seed,
         'num_trials': num_trials,
         'eval_protocol': DEFAULT_EVAL_PROTOCOL,
+    }
+
+
+def materialize_qrc_feature_channels(params, time_series, train_fraction, seed,
+                                     include_quantum=True):
+    """Rebuild the three QRC feature channels for a representative seed.
+
+    Returns a dict with the aligned reference series and three feature matrices
+    matching the training-split trajectory the readout actually learned from:
+        F_win   — raw sliding windows (explicit-memory channel)
+        F_esn   — classical reservoir state before the quantum map (implicit)
+        F_joint — Pauli expectations after the quantum map (readout features)
+
+    Set include_quantum=False to skip the PennyLane pass when only F_win and
+    F_esn are needed.
+    """
+    leakage_rate, lambda_reg, window_size, n_layers, lag = params
+    train_data, _, _ = split_and_scale_series(time_series, train_fraction)
+    train_inputs, _ = create_io_pairs(train_data, window_size, lag)
+
+    n_qubits = int(window_size)
+    n_samples = len(train_inputs)
+
+    classical_states = np.zeros((n_samples, n_qubits))
+    current = np.zeros(n_qubits)
+    for t in range(n_samples):
+        current = (1 - leakage_rate) * current + leakage_rate * train_inputs[t]
+        classical_states[t] = current
+
+    quantum_features = None
+    if include_quantum:
+        np.random.seed(seed)
+        weights = np.random.uniform(-np.pi, np.pi, (n_layers, n_qubits, 3))
+        biases = np.random.uniform(-0.5, 0.5, n_qubits)
+        dev = get_q_device(n_qubits)
+        quantum_features = np.zeros((n_samples, 3 * n_qubits))
+        for t in range(n_samples):
+            quantum_features[t] = quantum_feature_map(
+                inputs=classical_states[t], weights=weights, biases=biases,
+                n_layers=n_layers, n_qubits=n_qubits, dev=dev,
+            )
+
+    reference_series = np.asarray(train_inputs)[:, -1].astype(float)
+
+    return {
+        'reference_series': reference_series,
+        'F_win': np.asarray(train_inputs, dtype=float),
+        'F_esn': classical_states,
+        'F_joint': quantum_features,
+        'window_size': int(window_size),
+        'leakage_rate': float(leakage_rate),
+        'seed': int(seed),
     }
