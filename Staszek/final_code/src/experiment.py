@@ -1,5 +1,3 @@
-# src/experiment.py
-
 import numpy as np
 from sklearn.metrics import mean_squared_error
 
@@ -8,14 +6,14 @@ from .models import (train_esn_reservoir, predict_esn,
                      initialize_classical_reservoir, train_classical_reservoir,
                      predict_esn_classical)
 
-# --- Basic functions for running a single experiment (unchanged) ---
+# Helpers for single runs.
 
 DEFAULT_EVAL_PROTOCOL = "cold_start"
 DEFAULT_CLASSICAL_LAG = 0
 
 
 def _parse_classical_params(params):
-    """Supports both the new and legacy classical parameter tuples."""
+    """Parse new and legacy classical parameter tuples."""
     if len(params) == 6:
         reservoir_size, spectral_radius, sparsity, leakage_rate, lambda_reg, window_size = params
     elif len(params) == 5:
@@ -36,13 +34,13 @@ def _parse_classical_params(params):
 
 
 def _select_representative_seed(sub_seeds, mse_scores):
-    """Selects the seed corresponding to the median-ranked trial."""
+    """Pick the seed from the median-ranked trial."""
     ranked_indices = np.argsort(np.asarray(mse_scores), kind="stable")
     representative_index = ranked_indices[len(ranked_indices) // 2]
     return sub_seeds[representative_index]
 
 def run_single_qrc_trial(params, profile, time_series, train_fraction, seed):
-    """Runs a SINGLE trial for the QRC model for one specific seed."""
+    """Run one QRC trial for one seed."""
     leakage_rate, lambda_reg, window_size, n_layers, lag = params
     train_data, test_data, _ = split_and_scale_series(time_series, train_fraction)
     train_inputs, train_outputs = create_io_pairs(train_data, window_size, lag)
@@ -59,7 +57,7 @@ def run_single_qrc_trial(params, profile, time_series, train_fraction, seed):
     return mean_squared_error(test_outputs, predictions)
 
 def run_single_classical_trial(params, profile, time_series, train_fraction, seed):
-    """Runs a SINGLE trial for the Classical ESN model for one specific seed."""
+    """Run one classical ESN trial for one seed."""
     (reservoir_size, spectral_radius, sparsity, leakage_rate,
      lambda_reg, window_size, lag) = _parse_classical_params(params)
     train_data, test_data, _ = split_and_scale_series(time_series, train_fraction)
@@ -77,14 +75,12 @@ def run_single_classical_trial(params, profile, time_series, train_fraction, see
     )
     return mean_squared_error(test_outputs, predictions)
 
-# --- New wrapper functions that manage sub-seeds ---
+# Wrappers for repeated runs.
 
 def run_qrc_experiment_with_subseeds(params, profile, time_series, train_fraction, base_seed, num_trials=11):
-    """
-    Runs a QRC experiment multiple times with different sub-seeds and returns aggregated results.
-    """
+    """Run repeated QRC trials and return summary metrics."""
     mse_scores = []
-    # Build the sub-seed list from the main seed.
+    # Build sub-seeds from the base seed.
     sub_seeds = [base_seed + i for i in range(num_trials)]
     
     for seed in sub_seeds:
@@ -94,7 +90,7 @@ def run_qrc_experiment_with_subseeds(params, profile, time_series, train_fractio
     # Compute summary statistics.
     median_mse = np.median(mse_scores)
     std_dev_mse = np.std(mse_scores)
-    # Coefficient of variation (CV) used as a stability measure.
+    # Use CV as the stability metric.
     cv_mse = std_dev_mse / median_mse if median_mse > 0 else 0
     representative_seed = _select_representative_seed(sub_seeds, mse_scores)
 
@@ -117,9 +113,7 @@ def run_qrc_experiment_with_subseeds(params, profile, time_series, train_fractio
     }
 
 def run_classical_experiment_with_subseeds(params, profile, time_series, train_fraction, base_seed, num_trials=11):
-    """
-    Runs a Classical ESN experiment multiple times and returns aggregated results.
-    """
+    """Run repeated classical ESN trials and return summary metrics."""
     mse_scores = []
     sub_seeds = [base_seed + i for i in range(num_trials)]
 

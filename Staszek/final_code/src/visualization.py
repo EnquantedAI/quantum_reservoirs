@@ -1,12 +1,10 @@
-# src/visualization.py
-
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import mean_squared_error
 
-# Import necessary functions from other modules
+# Import project helpers.
 from .data_generation import create_io_pairs, split_and_scale_series
 from .models import (train_esn_reservoir, predict_esn,
                      initialize_classical_reservoir, train_classical_reservoir,
@@ -14,7 +12,7 @@ from .models import (train_esn_reservoir, predict_esn,
 
 
 def _get_optional_int(row, key, default):
-    """Converts a scalar result field into an int with NaN fallback support."""
+    """Read an integer field with NaN fallback."""
     value = row.get(key, default)
     try:
         if np.isnan(value):
@@ -25,7 +23,7 @@ def _get_optional_int(row, key, default):
 
 
 def _resolve_representative_seed(row, constants):
-    """Uses the stored representative seed when available."""
+    """Resolve the stored seed, if present."""
     for key in ("representative_seed", "base_seed"):
         value = row.get(key)
         try:
@@ -39,20 +37,18 @@ def _resolve_representative_seed(row, constants):
 
 
 def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_config, constants, show=True):
-    """
-    Generates and displays a plot comparing the best QRC and Classical ESN models.
-    """
+    """Plot the best QRC result against the target series."""
     profile_name = data_profile_config['name']
     print(f"\n{'='*60}\n--- Generating plot for profile: {profile_name} ---\n")
 
-    # --- 1. Regenerate Time Series ---
+    # Regenerate the time series.
     generator_func = data_profile_config['generator']
     time_series = generator_func(**data_profile_config['params'])
     train_series, test_series, _ = split_and_scale_series(time_series, constants['TRAIN_FRACTION'])
     figure_dir = Path(__file__).resolve().parent.parent / "reports" / "figures"
     figure_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- 2. Re-train Best QRC Model ---
+    # Retrain the best QRC model.
     print(f"Retraining best QRC model...")
     qrc_win_size = int(best_qrc_row['window_size'])
     qrc_lag = _get_optional_int(best_qrc_row, 'lag', 0)
@@ -79,8 +75,7 @@ def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_co
         f"Representative seed: {qrc_seed} | Reproduced MSE: {qrc_mse:.6f}"
     )
 
-    # --- 3. Re-train Best Classical ESN Model ---
-    # (We keep the training logic to allow console comparison, but it won't be plotted)
+    # Retrain the best classical ESN for console comparison.
     print(f"Retraining best Classical ESN model...")
     classical_win_size = _get_optional_int(best_classical_row, 'window_size', 10)
     classical_lag = _get_optional_int(best_classical_row, 'lag', 0)
@@ -115,29 +110,28 @@ def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_co
         f"Representative seed: {classical_seed} | Reproduced MSE: {classical_mse:.6f}"
     )
 
-    # --- 4. Plot Comparison ---
-    # Limit to first 200 time steps
+    # Plot the first 200 test steps.
     plot_limit = 200
     min_len = min(len(qrc_test_outputs), plot_limit)
     
     test_outputs = qrc_test_outputs[:min_len]
     qrc_preds_plot = qrc_preds[:min_len]
-    # Classical predictions prepared but NOT plotted
+    # Classical predictions are not plotted.
 
     plt.figure(figsize=(15, 7))
     
-    # 1. True Data (Solid line)
+    # Plot the target series.
     plt.plot(test_outputs, label="True Data (Test Set)", color="black", linewidth=2.5, alpha=0.8)
     
-    # 2. QRC Prediction (Dashed line, BOLDED via linewidth=2.5)
+    # Plot the QRC prediction.
     plt.plot(qrc_preds_plot, 
              label=f"Best QRC Prediction (Representative MSE: {qrc_mse:.6f})", 
              color="black", 
              linestyle="--", 
              alpha=0.9,
-             linewidth=2.5) # Increased thickness
+             linewidth=2.5)
     
-    # MODIFICATION: Classical ESN plot removed as requested.
+    # Leave the classical curve off the figure.
 
     plt.xlabel("Time Step (in test set)", fontsize=12)
     plt.ylabel("Normalized Value", fontsize=12)
