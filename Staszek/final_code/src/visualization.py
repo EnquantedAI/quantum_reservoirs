@@ -10,6 +10,8 @@ from .models import (train_esn_reservoir, predict_esn,
                      initialize_classical_reservoir, train_classical_reservoir,
                      predict_esn_classical)
 
+VALID_PLOT_STYLES = {"color", "bw"}
+
 
 def _get_optional_int(row, key, default):
     """Read an integer field with NaN fallback."""
@@ -36,8 +38,168 @@ def _resolve_representative_seed(row, constants):
     return int(constants.get("SEED", 2025))
 
 
-def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_config, constants, show=True):
-    """Plot the best QRC result against the target series."""
+def validate_plot_style(plot_style):
+    """Validate and normalize the plot style flag."""
+    normalized = str(plot_style).strip().lower()
+    if normalized not in VALID_PLOT_STYLES:
+        raise ValueError(
+            f"Invalid plot style '{plot_style}'. Expected one of: {sorted(VALID_PLOT_STYLES)}."
+        )
+    return normalized
+
+
+def get_plot_style_config(plot_style):
+    """Return a consistent style mapping for notebook figures."""
+    plot_style = validate_plot_style(plot_style)
+    window_sizes = [1, 2, 4, 6, 8, 10]
+
+    if plot_style == "color":
+        window_palette = {
+            1: "#4c78a8",
+            2: "#f58518",
+            4: "#54a24b",
+            6: "#e45756",
+            8: "#72b7b2",
+            10: "#b279a2",
+        }
+        return {
+            "plot_style": plot_style,
+            "window_sizes": window_sizes,
+            "window_palette": window_palette,
+            "grid_alpha": 0.30,
+            "annotation_facecolor": "#f8f9fb",
+            "annotation_edgecolor": "#c7ccd6",
+            "line_styles": {
+                "truth": {"color": "#202124", "linestyle": "-", "linewidth": 2.5},
+                "qrc": {"color": "#4c78a8", "linestyle": "--", "linewidth": 2.1},
+                "classical": {"color": "#f58518", "linestyle": ":", "linewidth": 2.3},
+                "qrc_error": {"color": "#4c78a8", "linestyle": "--", "linewidth": 1.8},
+                "classical_error": {"color": "#f58518", "linestyle": "-", "linewidth": 1.8},
+                "trend": {"color": "#7f7f7f", "linestyle": "--", "linewidth": 1.5},
+            },
+            "summary_colors": {"qrc": "#4c78a8", "classical": "#f58518"},
+            "summary_hatches": {"qrc": "", "classical": ""},
+            "classical_marker": {
+                "marker": "^",
+                "s": 180,
+                "facecolor": "#f58518",
+                "edgecolor": "#202124",
+                "linewidth": 0.9,
+            },
+            "best_qrc_marker": {
+                "marker": "o",
+                "s": 130,
+                "facecolor": "#4c78a8",
+                "edgecolor": "#202124",
+                "linewidth": 0.9,
+            },
+        }
+
+    window_palette = {
+        1: "#d9d9d9",
+        2: "#bdbdbd",
+        4: "#969696",
+        6: "#737373",
+        8: "#525252",
+        10: "#252525",
+    }
+    return {
+        "plot_style": plot_style,
+        "window_sizes": window_sizes,
+        "window_palette": window_palette,
+        "grid_alpha": 0.42,
+        "annotation_facecolor": "#fbfbfb",
+        "annotation_edgecolor": "#6c6c6c",
+        "line_styles": {
+            "truth": {"color": "#111111", "linestyle": "-", "linewidth": 2.5, "alpha": 0.82, "zorder": 2},
+            "qrc": {
+                "color": "#1f1f1f",
+                "linestyle": (0, (8.0, 2.4)),
+                "linewidth": 2.6,
+                "alpha": 0.98,
+                "zorder": 4,
+            },
+            "classical": {
+                "color": "#8b8b8b",
+                "linestyle": (0, (1.0, 1.4)),
+                "linewidth": 3.2,
+                "alpha": 1.0,
+                "zorder": 3,
+            },
+            "qrc_error": {
+                "color": "#1f1f1f",
+                "linestyle": (0, (8.0, 2.4)),
+                "linewidth": 2.1,
+                "alpha": 0.98,
+                "zorder": 3,
+            },
+            "classical_error": {
+                "color": "#7a7a7a",
+                "linestyle": (0, (1.0, 1.4)),
+                "linewidth": 2.5,
+                "alpha": 1.0,
+                "zorder": 2,
+            },
+            "trend": {"color": "#5f5f5f", "linestyle": "--", "linewidth": 1.5},
+        },
+        "summary_colors": {"qrc": "#2f2f2f", "classical": "#9a9a9a"},
+        "summary_hatches": {"qrc": "///", "classical": ""},
+        "classical_marker": {
+            "marker": "^",
+            "s": 180,
+            "facecolor": "#111111",
+            "edgecolor": "#111111",
+            "linewidth": 0.9,
+        },
+        "best_qrc_marker": {
+            "marker": "o",
+            "s": 130,
+            "facecolor": "#4f4f4f",
+            "edgecolor": "#111111",
+            "linewidth": 0.9,
+        },
+    }
+
+
+def _align_predictions_to_common_positions(test_series, qrc_win_size, qrc_lag, qrc_targets,
+                                           qrc_preds, classical_win_size, classical_lag,
+                                           classical_targets, classical_preds, plot_limit):
+    """Align model outputs on the shared absolute test-set positions."""
+    qrc_positions = np.arange(qrc_win_size + qrc_lag, qrc_win_size + qrc_lag + len(qrc_targets))
+    classical_positions = np.arange(
+        classical_win_size + classical_lag,
+        classical_win_size + classical_lag + len(classical_targets),
+    )
+    common_positions = np.intersect1d(qrc_positions, classical_positions)
+
+    if common_positions.size == 0:
+        min_len = min(len(qrc_targets), len(classical_targets), plot_limit)
+        common_positions = np.arange(min_len)
+        true_values = np.asarray(test_series[:min_len]).ravel()
+        return {
+            "x": common_positions,
+            "true_values": true_values,
+            "qrc_preds": np.asarray(qrc_preds).ravel()[:min_len],
+            "classical_preds": np.asarray(classical_preds).ravel()[:min_len],
+        }
+
+    common_positions = common_positions[:plot_limit]
+    qrc_indices = np.searchsorted(qrc_positions, common_positions)
+    classical_indices = np.searchsorted(classical_positions, common_positions)
+
+    return {
+        "x": common_positions,
+        "true_values": np.asarray(test_series[common_positions]).ravel(),
+        "qrc_preds": np.asarray(qrc_preds).ravel()[qrc_indices],
+        "classical_preds": np.asarray(classical_preds).ravel()[classical_indices],
+    }
+
+
+def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_config, constants,
+                               plot_style="color", show=True):
+    """Plot the best QRC and classical ESN results against the target series."""
+    plot_style = validate_plot_style(plot_style)
+    style = get_plot_style_config(plot_style)
     profile_name = data_profile_config['name']
     print(f"\n{'='*60}\n--- Generating plot for profile: {profile_name} ---\n")
 
@@ -110,37 +272,142 @@ def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_co
         f"Representative seed: {classical_seed} | Reproduced MSE: {classical_mse:.6f}"
     )
 
-    # Plot the first 200 test steps.
     plot_limit = 200
-    min_len = min(len(qrc_test_outputs), plot_limit)
-    
-    test_outputs = qrc_test_outputs[:min_len]
-    qrc_preds_plot = qrc_preds[:min_len]
-    # Classical predictions are not plotted.
+    aligned = _align_predictions_to_common_positions(
+        test_series=test_series,
+        qrc_win_size=qrc_win_size,
+        qrc_lag=qrc_lag,
+        qrc_targets=qrc_test_outputs,
+        qrc_preds=qrc_preds,
+        classical_win_size=classical_win_size,
+        classical_lag=classical_lag,
+        classical_targets=classical_test_outputs,
+        classical_preds=classical_preds,
+        plot_limit=plot_limit,
+    )
 
-    plt.figure(figsize=(15, 7))
-    
-    # Plot the target series.
-    plt.plot(test_outputs, label="True Data (Test Set)", color="black", linewidth=2.5, alpha=0.8)
-    
-    # Plot the QRC prediction.
-    plt.plot(qrc_preds_plot, 
-             label=f"Best QRC Prediction (Representative MSE: {qrc_mse:.6f})", 
-             color="black", 
-             linestyle="--", 
-             alpha=0.9,
-             linewidth=2.5)
-    
-    # Leave the classical curve off the figure.
+    x_values = aligned["x"]
+    true_values = aligned["true_values"]
+    qrc_preds_plot = aligned["qrc_preds"]
+    classical_preds_plot = aligned["classical_preds"]
+    qrc_error = np.abs(true_values - qrc_preds_plot)
+    classical_error = np.abs(true_values - classical_preds_plot)
 
-    plt.xlabel("Time Step (in test set)", fontsize=12)
-    plt.ylabel("Normalized Value", fontsize=12)
-    plt.title(f"One-Step-Ahead Prediction Comparison for: {profile_name}", fontsize=14, weight='bold')
-    plt.legend(loc='upper right', fontsize=10)
-    plt.grid(True, which='both', linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.savefig(figure_dir / f"{profile_name}_comparison.png", dpi=300)
+    fig, (ax_top, ax_bottom) = plt.subplots(
+        2,
+        1,
+        figsize=(15, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3.0, 1.4]},
+    )
+
+    truth_plot_kwargs = dict(style["line_styles"]["truth"])
+    qrc_plot_kwargs = dict(style["line_styles"]["qrc"])
+    classical_plot_kwargs = dict(style["line_styles"]["classical"])
+
+    if plot_style == "bw":
+        marker_spacing = max(10, len(x_values) // 14)
+        truth_plot_kwargs.update({"color": "#6e6e6e", "linewidth": 2.0, "alpha": 0.85, "zorder": 1})
+        qrc_plot_kwargs.update(
+            {
+                "marker": "s",
+                "markersize": 5.0,
+                "markevery": marker_spacing,
+                "markerfacecolor": "#111111",
+                "markeredgecolor": "#111111",
+                "markeredgewidth": 0.8,
+            }
+        )
+        classical_plot_kwargs.update(
+            {
+                "marker": "^",
+                "markersize": 5.8,
+                "markevery": marker_spacing,
+                "markerfacecolor": "white",
+                "markeredgecolor": "#7a7a7a",
+                "markeredgewidth": 1.0,
+            }
+        )
+
+    ax_top.plot(x_values, true_values, label="True Data", **truth_plot_kwargs)
+    ax_top.plot(x_values, qrc_preds_plot, label="Best QRC", **qrc_plot_kwargs)
+    ax_top.plot(
+        x_values,
+        classical_preds_plot,
+        label="Best Classical ESN",
+        **classical_plot_kwargs,
+    )
+    ax_top.set_ylabel("Normalized Value", fontsize=12)
+    ax_top.set_title(profile_name, fontsize=16, weight="bold")
+    ax_top.legend(loc="upper right", fontsize=10, frameon=True)
+    ax_top.grid(True, linestyle="--", alpha=style["grid_alpha"])
+
+    annotation_text = "\n".join(
+        [
+            "QRC:",
+            (
+                f"MSE {best_qrc_row['median_mse']:.3e} | repro {qrc_mse:.3e} | "
+                f"CV {best_qrc_row['cv_mse']:.2f}"
+            ),
+            (
+                f"win {qrc_win_size}, layers {int(best_qrc_row['n_layers'])}, "
+                f"leak {best_qrc_row['leakage_rate']:.2f}"
+            ),
+            (
+                f"lambda {best_qrc_row['lambda_reg']:.2e}, lag {qrc_lag}, seed {qrc_seed}"
+            ),
+            "",
+            "Classical ESN:",
+            (
+                f"MSE {best_classical_row['median_mse']:.3e} | repro {classical_mse:.3e} | "
+                f"CV {best_classical_row['cv_mse']:.2f}"
+            ),
+            (
+                f"win {classical_win_size}, res {_get_optional_int(best_classical_row, 'reservoir_size', 10)}, "
+                f"leak {best_classical_row['leakage_rate']:.2f}"
+            ),
+            (
+                f"radius {best_classical_row['spectral_radius']:.2f}, "
+                f"sparsity {best_classical_row['sparsity']:.2f}, seed {classical_seed}"
+            ),
+        ]
+    )
+    ax_top.text(
+        0.015,
+        0.98,
+        annotation_text,
+        transform=ax_top.transAxes,
+        va="top",
+        ha="left",
+        fontsize=9,
+        bbox={
+            "boxstyle": "round,pad=0.4",
+            "facecolor": style["annotation_facecolor"],
+            "edgecolor": style["annotation_edgecolor"],
+            "alpha": 0.95,
+        },
+    )
+
+    ax_bottom.plot(x_values, qrc_error, label="QRC Absolute Error", **style["line_styles"]["qrc_error"])
+    ax_bottom.plot(
+        x_values,
+        classical_error,
+        label="Classical ESN Absolute Error",
+        **style["line_styles"]["classical_error"],
+    )
+    ax_bottom.set_xlabel("Prediction Step in Test Set", fontsize=12)
+    ax_bottom.set_ylabel("Absolute Error", fontsize=12)
+    ax_bottom.grid(True, linestyle="--", alpha=style["grid_alpha"])
+    ax_bottom.legend(loc="upper right", fontsize=10, frameon=True)
+
+    fig.suptitle("One-Step-Ahead Prediction Comparison", fontsize=18, y=0.98)
+    fig.tight_layout()
+    fig.savefig(
+        figure_dir / f"{profile_name}_comparison_{plot_style}.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
     if show:
         plt.show()
     else:
-        plt.close()
+        plt.close(fig)
