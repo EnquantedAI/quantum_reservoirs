@@ -111,11 +111,35 @@ def get_plot_style_config(plot_style):
         "annotation_facecolor": "#fbfbfb",
         "annotation_edgecolor": "#6c6c6c",
         "line_styles": {
-            "truth": {"color": "#111111", "linestyle": "-", "linewidth": 2.6},
-            "qrc": {"color": "#3d3d3d", "linestyle": "--", "linewidth": 2.1},
-            "classical": {"color": "#7d7d7d", "linestyle": ":", "linewidth": 2.5},
-            "qrc_error": {"color": "#3d3d3d", "linestyle": "--", "linewidth": 1.8},
-            "classical_error": {"color": "#6a6a6a", "linestyle": "-", "linewidth": 1.8},
+            "truth": {"color": "#111111", "linestyle": "-", "linewidth": 2.5, "alpha": 0.82, "zorder": 2},
+            "qrc": {
+                "color": "#1f1f1f",
+                "linestyle": (0, (8.0, 2.4)),
+                "linewidth": 2.6,
+                "alpha": 0.98,
+                "zorder": 4,
+            },
+            "classical": {
+                "color": "#8b8b8b",
+                "linestyle": (0, (1.0, 1.4)),
+                "linewidth": 3.2,
+                "alpha": 1.0,
+                "zorder": 3,
+            },
+            "qrc_error": {
+                "color": "#1f1f1f",
+                "linestyle": (0, (8.0, 2.4)),
+                "linewidth": 2.1,
+                "alpha": 0.98,
+                "zorder": 3,
+            },
+            "classical_error": {
+                "color": "#7a7a7a",
+                "linestyle": (0, (1.0, 1.4)),
+                "linewidth": 2.5,
+                "alpha": 1.0,
+                "zorder": 2,
+            },
             "trend": {"color": "#5f5f5f", "linestyle": "--", "linewidth": 1.5},
         },
         "summary_colors": {"qrc": "#2f2f2f", "classical": "#9a9a9a"},
@@ -277,13 +301,41 @@ def plot_best_model_comparison(best_qrc_row, best_classical_row, data_profile_co
         gridspec_kw={"height_ratios": [3.0, 1.4]},
     )
 
-    ax_top.plot(x_values, true_values, label="True Data", **style["line_styles"]["truth"])
-    ax_top.plot(x_values, qrc_preds_plot, label="Best QRC", **style["line_styles"]["qrc"])
+    truth_plot_kwargs = dict(style["line_styles"]["truth"])
+    qrc_plot_kwargs = dict(style["line_styles"]["qrc"])
+    classical_plot_kwargs = dict(style["line_styles"]["classical"])
+
+    if plot_style == "bw":
+        marker_spacing = max(10, len(x_values) // 14)
+        truth_plot_kwargs.update({"color": "#6e6e6e", "linewidth": 2.0, "alpha": 0.85, "zorder": 1})
+        qrc_plot_kwargs.update(
+            {
+                "marker": "s",
+                "markersize": 5.0,
+                "markevery": marker_spacing,
+                "markerfacecolor": "#111111",
+                "markeredgecolor": "#111111",
+                "markeredgewidth": 0.8,
+            }
+        )
+        classical_plot_kwargs.update(
+            {
+                "marker": "^",
+                "markersize": 5.8,
+                "markevery": marker_spacing,
+                "markerfacecolor": "white",
+                "markeredgecolor": "#7a7a7a",
+                "markeredgewidth": 1.0,
+            }
+        )
+
+    ax_top.plot(x_values, true_values, label="True Data", **truth_plot_kwargs)
+    ax_top.plot(x_values, qrc_preds_plot, label="Best QRC", **qrc_plot_kwargs)
     ax_top.plot(
         x_values,
         classical_preds_plot,
         label="Best Classical ESN",
-        **style["line_styles"]["classical"],
+        **classical_plot_kwargs,
     )
     ax_top.set_ylabel("Normalized Value", fontsize=12)
     ax_top.set_title(profile_name, fontsize=16, weight="bold")
